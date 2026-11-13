@@ -12,9 +12,18 @@ python -m http.server 8000
 
 ## 发一篇新文章
 
-1. 复制 `posts/welcome.html` 为新文件
-2. 修改标题、日期与正文
-3. 在 `index.html` 的 Posts 列表最上方加一条链接
+1. 复制 `posts/_template.html`，另存为例如 `posts/my-topic.html`（不要用下划线开头）
+2. 按文件里的注释改：摘要、标题、日期、正文
+3. 把文件发给我，或放进 `posts/`；我会补首页入口并推送
+
+首页列表格式（日期新的在上）：
+
+```html
+<li>
+  <span class="post-meta">2024-03-18</span>
+  <a class="post-link" href="/posts/my-topic.html">文章标题</a>
+</li>
+```
 
 ## 加一个工具
 
