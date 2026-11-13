@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>白板 · 36953's blog</title>
+    <link rel="stylesheet" href="/tools/assets/tools.css" />
+  </head>
+  <body class="app tool-shell">
+        <header class="site-header" role="banner">
+      <div class="wrapper">
+        <a class="site-title" rel="author" href="/">36953's blog</a>
+        <nav class="site-nav" aria-label="主导航">
+          <a class="page-link" href="/tools/">工具</a>
+          <a class="page-link" href="/about/">关于</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="board-wrap">
+      <div class="stage" id="stage">
+        <canvas id="board" aria-label="白板画布"></canvas>
+      </div>
+      <div class="dock" role="toolbar" aria-label="白板工具">
+        <div class="swatches" id="colors">
+          <button class="swatch is-on" type="button" data-color="#18212b" style="background:#18212b" aria-label="黑色"></button>
+          <button class="swatch" type="button" data-color="#9c3b32" style="background:#9c3b32" aria-label="红色"></button>
+          <button class="swatch" type="button" data-color="#1f6f6a" style="background:#1f6f6a" aria-label="绿色"></button>
+          <button class="swatch" type="button" data-color="#2458a8" style="background:#2458a8" aria-label="蓝色"></button>
+          <button class="swatch" type="button" data-color="#c47b12" style="background:#c47b12" aria-label="橙色"></button>
+        </div>
+        <button type="button" id="pen" class="is-on">画笔</button>
+        <button type="button" id="eraser">橡皮</button>
+        <label class="size-label">粗细
+          <input id="size" type="range" min="2" max="28" value="4" />
+        </label>
+        <button type="button" id="undo" disabled>撤销</button>
+        <button type="button" id="redo" disabled>重做</button>
+        <button type="button" id="grid" aria-pressed="false">网格</button>
+        <button type="button" id="clear">清空</button>
+        <button type="button" id="save">导出图片</button>
+        <button type="button" id="full">全屏</button>
+      </div>
+    </div>
+
+    <script>
+      const KEY = "classroom-whiteboard-v1";
+      const BOARD = "#fffcf8";
+      const canvas = document.getElementById("board");
+      const ctx = canvas.getContext("2d");
+      const stage = document.getElementById("stage");
+      const sizeInput = document.getElementById("size");
+      let tool = "pen";
+      let color = "#18212b";
+      let gridOn = false;
+      let strokes = [];
+      let current = null;
+      let past = [];
+      let future = [];
+
+      function clone(list) {
+        return list.map(function (stroke) {
+          return {
+            tool: stroke.tool,
+            color: stroke.color,
+            size: stroke.size,
+            points: stroke.points.map(function (p) {
+              return { x: p.x, y: p.y };
+            })
+          };
+        });
+      }
+
+      function load() {
+        try {
+          const data = JSON.parse(localStorage.getItem(KEY) || "[]");
+          if (Array.isArray(data)) strokes = data;
+        } catch (err) {
+          strokes = [];
+        }
+      }
+
+      function persist() {
+        try {
+          localStorage.setItem(KEY, JSON.stringify(strokes));
+        } catch (err) {}
+      }
+
+      function sync() {
+        document.getElementById("undo").disabled = past.length === 0;
+        document.getElementById("redo").disabled = future.length === 0;
+        document.getElementById("pen").classList.toggle("is-on", tool === "pen");
+        document.getElementById("eraser").classList.toggle("is-on", tool === "eraser");
+        document.getElementById("grid").classList.toggle("is-on", gridOn);
+        document.getElementById("grid").setAttribute("aria-pressed", gridOn ? "true" : "false");
+        canvas.style.cursor = tool === "eraser" ? "cell" : "crosshair";
+      }
+
+      function drawStroke(stroke) {
+        const points = stroke.points;
+        if (!points.length) return;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = stroke.tool === "eraser" ? BOARD : stroke.color;
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.lineWidth = stroke.tool === "eraser" ? Math.max(stroke.size * 3, 14) : stroke.size;
+        if (points.length === 1) {
+          ctx.beginPath();
+          ctx.arc(points[0].x, points[0].y, ctx.lineWidth / 2, 0, Math.PI * 2);
+          ctx.fill();
+          return;
+        }
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i].x, points[i].y);
+        ctx.stroke();
+      }
+
+      function render() {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        const dpr = canvas.width / width || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = BOARD;
+        ctx.fillRect(0, 0, width, height);
+        if (gridOn) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(24, 33, 43, 0.1)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let x = 32; x < width; x += 32) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+          }
+          for (let y = 32; y < height; y += 32) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+        strokes.forEach(drawStroke);
+        if (current) drawStroke(current);
+      }
+
+      function fit() {
+        const width = stage.clientWidth;
+        const height = stage.clientHeight;
+        if (width < 2 || height < 2) return;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const nextW = Math.floor(width * dpr);
+        const nextH = Math.floor(height * dpr);
+        if (canvas.width !== nextW || canvas.height !== nextH) {
+          canvas.width = nextW;
+          canvas.height = nextH;
+        }
+        render();
+      }
+
+      function pos(event) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      }
+
+      canvas.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0) return;
+        canvas.setPointerCapture(event.pointerId);
+        current = {
+          tool: tool,
+          color: color,
+          size: Number(sizeInput.value),
+          points: [pos(event)]
+        };
+        render();
+      });
+
+      canvas.addEventListener("pointermove", function (event) {
+        if (!current) return;
+        const point = pos(event);
+        const last = current.points[current.points.length - 1];
+        if (Math.hypot(point.x - last.x, point.y - last.y) < 1.2) return;
+        current.points.push(point);
+        render();
+      });
+
+      function endStroke() {
+        if (!current) return;
+        const stroke = current;
+        current = null;
+        if (!stroke.points.length) return;
+        past.push(clone(strokes));
+        if (past.length > 60) past.shift();
+        future = [];
+        strokes.push(stroke);
+        persist();
+        sync();
+        render();
+      }
+
+      canvas.addEventListener("pointerup", endStroke);
+      canvas.addEventListener("pointercancel", endStroke);
+      canvas.addEventListener("contextmenu", function (event) {
+        event.preventDefault();
+      });
+
+      document.getElementById("colors").addEventListener("click", function (event) {
+        const button = event.target.closest("[data-color]");
+        if (!button) return;
+        color = button.dataset.color;
+        tool = "pen";
+        document.querySelectorAll(".swatch").forEach(function (swatch) {
+          swatch.classList.toggle("is-on", swatch === button);
+        });
+        sync();
+      });
+
+      document.getElementById("pen").addEventListener("click", function () {
+        tool = "pen";
+        sync();
+      });
+      document.getElementById("eraser").addEventListener("click", function () {
+        tool = "eraser";
+        sync();
+      });
+      document.getElementById("undo").addEventListener("click", function () {
+        if (!past.length) return;
+        future.push(clone(strokes));
+        strokes = past.pop();
+        persist();
+        sync();
+        render();
+      });
+      document.getElementById("redo").addEventListener("click", function () {
+        if (!future.length) return;
+        past.push(clone(strokes));
+        strokes = future.pop();
+        persist();
+        sync();
+        render();
+      });
+      document.getElementById("grid").addEventListener("click", function () {
+        gridOn = !gridOn;
+        sync();
+        render();
+      });
+      document.getElementById("clear").addEventListener("click", function () {
+        if (!strokes.length) return;
+        past.push(clone(strokes));
+        future = [];
+        strokes = [];
+        persist();
+        sync();
+        render();
+      });
+      document.getElementById("save").addEventListener("click", function () {
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = "白板.png";
+        link.click();
+      });
+      document.getElementById("full").addEventListener("click", function () {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          stage.requestFullscreen();
+        }
+      });
+
+      load();
+      sync();
+      new ResizeObserver(fit).observe(stage);
+      fit();
+    </script>
+  </body>
+</html>

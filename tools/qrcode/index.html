@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>二维码 · 36953's blog</title>
+    <link rel="stylesheet" href="/tools/assets/tools.css" />
+  </head>
+  <body class="tool-shell">
+        <header class="site-header" role="banner">
+      <div class="wrapper">
+        <a class="site-title" rel="author" href="/">36953's blog</a>
+        <nav class="site-nav" aria-label="主导航">
+          <a class="page-link" href="/tools/">工具</a>
+          <a class="page-link" href="/about/">关于</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="panel">
+      <h1>二维码</h1>
+      <p class="lede">把作业链接、网盘地址或一段通知变成二维码，投到屏幕上让学生扫。</p>
+      <div class="qr-layout">
+        <section class="names">
+          <label class="field" for="qr-text">链接或文字</label>
+          <textarea id="qr-text" placeholder="https://example.com/homework"></textarea>
+          <p class="error" id="qr-error" role="status"></p>
+          <div class="row">
+            <button class="primary" type="button" id="download" disabled>下载图片</button>
+          </div>
+          <p class="hint">内容只在这台浏览器里生成，不会发送出去。</p>
+        </section>
+        <section class="qr-card">
+          <canvas id="qr" width="280" height="280" aria-label="二维码"></canvas>
+        </section>
+      </div>
+    </main>
+
+    <script src="/tools/vendor/qrcode.js"></script>
+    <script src="/tools/vendor/qrcode-utf8.js"></script>
+    <script>
+      const KEY = "classroom-qr-text";
+      const input = document.getElementById("qr-text");
+      const canvas = document.getElementById("qr");
+      const errorEl = document.getElementById("qr-error");
+      const downloadBtn = document.getElementById("download");
+      const ctx = canvas.getContext("2d");
+      let ready = false;
+
+      function clearCanvas() {
+        canvas.width = 280;
+        canvas.height = 280;
+        ctx.fillStyle = "#fffcf8";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ready = false;
+        downloadBtn.disabled = true;
+      }
+
+      function draw(text) {
+        const levels = ["M", "L"];
+        let qr = null;
+        for (let i = 0; i < levels.length; i += 1) {
+          try {
+            const next = qrcode(0, levels[i]);
+            next.addData(text);
+            next.make();
+            qr = next;
+            break;
+          } catch (err) {
+            qr = null;
+          }
+        }
+        if (!qr) {
+          clearCanvas();
+          errorEl.textContent = "这段内容太长，缩短一点再试。";
+          return;
+        }
+        const count = qr.getModuleCount();
+        const margin = 4;
+        const scale = 8;
+        const size = (count + margin * 2) * scale;
+        canvas.width = size;
+        canvas.height = size;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, size, size);
+        ctx.fillStyle = "#18212b";
+        for (let row = 0; row < count; row += 1) {
+          for (let col = 0; col < count; col += 1) {
+            if (qr.isDark(row, col)) {
+              ctx.fillRect((col + margin) * scale, (row + margin) * scale, scale, scale);
+            }
+          }
+        }
+        errorEl.textContent = "";
+        ready = true;
+        downloadBtn.disabled = false;
+      }
+
+      function update() {
+        const text = input.value.trim();
+        try {
+          localStorage.setItem(KEY, input.value);
+        } catch (err) {}
+        if (!text) {
+          clearCanvas();
+          errorEl.textContent = "";
+          return;
+        }
+        draw(text);
+      }
+
+      input.addEventListener("input", update);
+      downloadBtn.addEventListener("click", function () {
+        if (!ready) return;
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = "二维码.png";
+        link.click();
+      });
+
+      try {
+        input.value = localStorage.getItem(KEY) || "";
+      } catch (err) {}
+      update();
+    </script>
+  </body>
+</html>

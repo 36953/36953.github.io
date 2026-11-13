@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>计时 · 36953's blog</title>
+    <link rel="stylesheet" href="/tools/assets/tools.css" />
+  </head>
+  <body class="tool-shell">
+        <header class="site-header" role="banner">
+      <div class="wrapper">
+        <a class="site-title" rel="author" href="/">36953's blog</a>
+        <nav class="site-nav" aria-label="主导航">
+          <a class="page-link" href="/tools/">工具</a>
+          <a class="page-link" href="/about/">关于</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="panel" id="clock-panel">
+      <div class="clock-card">
+        <div class="modes" role="tablist" aria-label="计时方式">
+          <button type="button" id="mode-down" class="is-on" role="tab" aria-selected="true">倒计时</button>
+          <button type="button" id="mode-up" role="tab" aria-selected="false">秒表</button>
+        </div>
+        <p class="time" id="time" aria-live="polite">05:00</p>
+        <div class="presets" id="presets">
+          <button type="button" data-ms="30000">30 秒</button>
+          <button type="button" data-ms="60000">1 分钟</button>
+          <button type="button" data-ms="180000">3 分钟</button>
+          <button type="button" data-ms="300000">5 分钟</button>
+          <button type="button" data-ms="600000">10 分钟</button>
+        </div>
+        <div class="custom">
+          <label>分 <input id="minutes" type="number" min="0" max="180" value="5" /></label>
+          <label>秒 <input id="seconds" type="number" min="0" max="59" value="0" /></label>
+          <button type="button" id="apply">设定</button>
+        </div>
+        <div class="clock-actions">
+          <button class="primary" type="button" id="toggle">开始</button>
+          <button type="button" id="reset">复位</button>
+          <button type="button" id="lap" hidden>记一圈</button>
+          <button type="button" id="full">全屏</button>
+        </div>
+        <ol class="laps" id="laps"></ol>
+        <p class="hint">空格开始或暂停。倒计时结束时画面变红，并响三声。</p>
+      </div>
+    </main>
+
+    <script>
+      const timeEl = document.getElementById("time");
+      const toggleEl = document.getElementById("toggle");
+      const lapBtn = document.getElementById("lap");
+      const lapsEl = document.getElementById("laps");
+      let mode = "down";
+      let duration = 5 * 60 * 1000;
+      let remaining = duration;
+      let elapsed = 0;
+      let running = false;
+      let finished = false;
+      let last = 0;
+      let audio = null;
+      let laps = [];
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function formatDown(ms) {
+        const total = Math.ceil(Math.max(0, ms) / 1000);
+        const minutes = Math.floor(total / 60);
+        const seconds = total % 60;
+        return pad(minutes) + ":" + pad(seconds);
+      }
+
+      function formatUp(ms) {
+        const whole = Math.floor(Math.max(0, ms));
+        const minutes = Math.floor(whole / 60000);
+        const seconds = Math.floor(whole / 1000) % 60;
+        const tenths = Math.floor(whole / 100) % 10;
+        return pad(minutes) + ":" + pad(seconds) + "." + tenths;
+      }
+
+      function render() {
+        timeEl.textContent = mode === "down" ? formatDown(remaining) : formatUp(elapsed);
+        document.title = timeEl.textContent + " · 计时";
+        document.body.classList.toggle("is-done", finished);
+        toggleEl.textContent = finished ? "再来一次" : running ? "暂停" : "开始";
+        lapBtn.hidden = mode !== "up";
+        document.getElementById("mode-down").classList.toggle("is-on", mode === "down");
+        document.getElementById("mode-up").classList.toggle("is-on", mode === "up");
+        document.getElementById("mode-down").setAttribute("aria-selected", mode === "down" ? "true" : "false");
+        document.getElementById("mode-up").setAttribute("aria-selected", mode === "up" ? "true" : "false");
+        document.getElementById("presets").hidden = mode !== "down";
+        document.querySelector(".custom").hidden = mode !== "down";
+      }
+
+      function renderLaps() {
+        lapsEl.replaceChildren();
+        laps.forEach(function (mark, index) {
+          const item = document.createElement("li");
+          item.textContent = "第 " + (laps.length - index) + " 圈  " + formatUp(mark);
+          lapsEl.appendChild(item);
+        });
+      }
+
+      function frame(now) {
+        if (!running) return;
+        if (!last) last = now;
+        const delta = Math.max(0, now - last);
+        last = now;
+        if (mode === "down") {
+          remaining -= delta;
+          if (remaining <= 0) {
+            remaining = 0;
+            running = false;
+            finished = true;
+            beep();
+            render();
+            return;
+          }
+        } else {
+          elapsed += delta;
+        }
+        render();
+        requestAnimationFrame(frame);
+      }
+
+      function ensureAudio() {
+        if (!audio) audio = new AudioContext();
+        if (audio.state === "suspended") audio.resume();
+      }
+
+      function beep() {
+        ensureAudio();
+        const start = audio.currentTime;
+        [0, 0.18, 0.36].forEach(function (offset, index) {
+          const osc = audio.createOscillator();
+          const gain = audio.createGain();
+          osc.type = "sine";
+          osc.frequency.value = index === 2 ? 1175 : 880;
+          osc.connect(gain);
+          gain.connect(audio.destination);
+          gain.gain.setValueAtTime(0.0001, start + offset);
+          gain.gain.exponentialRampToValueAtTime(0.18, start + offset + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.15);
+          osc.start(start + offset);
+          osc.stop(start + offset + 0.17);
+        });
+      }
+
+      function start() {
+        if (mode === "down" && (finished || remaining <= 0)) {
+          remaining = duration;
+          finished = false;
+        }
+        if (mode === "down" && remaining <= 0) return;
+        ensureAudio();
+        running = true;
+        finished = false;
+        last = 0;
+        render();
+        requestAnimationFrame(frame);
+      }
+
+      function pause() {
+        running = false;
+        render();
+      }
+
+      function toggle() {
+        if (finished) {
+          start();
+          return;
+        }
+        if (running) pause();
+        else start();
+      }
+
+      function setDuration(ms) {
+        duration = Math.max(1000, ms);
+        remaining = duration;
+        finished = false;
+        running = false;
+        mode = "down";
+        const total = Math.round(duration / 1000);
+        document.getElementById("minutes").value = String(Math.floor(total / 60));
+        document.getElementById("seconds").value = String(total % 60);
+        render();
+      }
+
+      document.getElementById("mode-down").addEventListener("click", function () {
+        mode = "down";
+        running = false;
+        finished = false;
+        render();
+      });
+      document.getElementById("mode-up").addEventListener("click", function () {
+        mode = "up";
+        running = false;
+        finished = false;
+        render();
+      });
+      document.getElementById("presets").addEventListener("click", function (event) {
+        const button = event.target.closest("[data-ms]");
+        if (!button) return;
+        setDuration(Number(button.dataset.ms));
+        start();
+      });
+      document.getElementById("apply").addEventListener("click", function () {
+        const minutes = Math.max(0, Number(document.getElementById("minutes").value) || 0);
+        const seconds = Math.max(0, Math.min(59, Number(document.getElementById("seconds").value) || 0));
+        const ms = (minutes * 60 + seconds) * 1000;
+        if (ms < 1000) return;
+        setDuration(ms);
+      });
+      toggleEl.addEventListener("click", toggle);
+      document.getElementById("reset").addEventListener("click", function () {
+        running = false;
+        finished = false;
+        if (mode === "down") remaining = duration;
+        else {
+          elapsed = 0;
+          laps = [];
+          renderLaps();
+        }
+        render();
+      });
+      lapBtn.addEventListener("click", function () {
+        if (mode !== "up") return;
+        laps.unshift(elapsed);
+        if (laps.length > 12) laps.pop();
+        renderLaps();
+      });
+      document.getElementById("full").addEventListener("click", function () {
+        const panel = document.getElementById("clock-panel");
+        if (document.fullscreenElement) document.exitFullscreen();
+        else panel.requestFullscreen();
+      });
+      window.addEventListener("keydown", function (event) {
+        if (event.code !== "Space") return;
+        if (event.target.closest("input, textarea, button, a")) return;
+        event.preventDefault();
+        toggle();
+      });
+
+      render();
+    </script>
+  </body>
+</html>

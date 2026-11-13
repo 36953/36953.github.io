@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>点名 · 36953's blog</title>
+    <link rel="stylesheet" href="/tools/assets/tools.css" />
+  </head>
+  <body class="tool-shell">
+        <header class="site-header" role="banner">
+      <div class="wrapper">
+        <a class="site-title" rel="author" href="/">36953's blog</a>
+        <nav class="site-nav" aria-label="主导航">
+          <a class="page-link" href="/tools/">工具</a>
+          <a class="page-link" href="/about/">关于</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="panel">
+      <h1>点名</h1>
+      <div class="roll-layout">
+        <section class="names">
+          <label class="field" for="names">名单，一行一个名字</label>
+          <textarea id="names" placeholder="林晓&#10;周衡&#10;陈一诺"></textarea>
+          <div class="row">
+            <button type="button" id="sample">填入示例</button>
+            <button type="button" id="clear-names">清空名单</button>
+          </div>
+        </section>
+        <section class="stage-card">
+          <p class="pick is-idle" id="pick" aria-live="polite">先写下名单</p>
+          <p class="status" id="status"></p>
+          <div class="row">
+            <button class="primary" type="button" id="draw">点一名</button>
+            <button type="button" id="again">这一轮重来</button>
+            <label class="size-label">分成
+              <input id="group-count" type="number" min="2" max="12" value="4" />
+              组
+            </label>
+            <button type="button" id="group">分组</button>
+          </div>
+          <div class="picked" id="picked" aria-label="已经点过的名字"></div>
+          <div class="groups" id="groups"></div>
+          <p class="hint">空格也可以点下一名。名单保存在这台浏览器里。</p>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const KEY = "classroom-rollcall-names";
+      const SAMPLE = ["林晓", "周衡", "陈一诺", "赵明远", "孙启航", "吴清和", "郑小满", "何安然"];
+      const namesEl = document.getElementById("names");
+      const pickEl = document.getElementById("pick");
+      const statusEl = document.getElementById("status");
+      const pickedEl = document.getElementById("picked");
+      const groupsEl = document.getElementById("groups");
+      let pool = [];
+      let picked = [];
+      let spinning = false;
+
+      function readNames() {
+        const seen = Object.create(null);
+        return namesEl.value
+          .split(/\r?\n/)
+          .map(function (line) { return line.trim(); })
+          .filter(function (name) {
+            if (!name || seen[name]) return false;
+            seen[name] = true;
+            return true;
+          });
+      }
+
+      function resetPool() {
+        pool = readNames();
+        picked = [];
+        renderPicked();
+        renderStatus();
+      }
+
+      function renderStatus() {
+        const total = readNames().length;
+        if (!total) {
+          statusEl.textContent = "名单是空的。";
+          return;
+        }
+        statusEl.textContent = "这一轮还剩 " + pool.length + " 人，已点 " + picked.length + " 人。";
+      }
+
+      function renderPicked() {
+        pickedEl.replaceChildren();
+        picked.forEach(function (name) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          chip.textContent = name;
+          pickedEl.appendChild(chip);
+        });
+      }
+
+      function showName(name, idle) {
+        pickEl.textContent = name;
+        pickEl.classList.toggle("is-idle", idle);
+      }
+
+      function draw() {
+        const names = readNames();
+        if (!names.length || spinning) return;
+        if (!pool.length) {
+          showName("这一轮都点过了", true);
+          return;
+        }
+        const index = Math.floor(Math.random() * pool.length);
+        const chosen = pool.splice(index, 1)[0];
+        picked.push(chosen);
+        renderPicked();
+        renderStatus();
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduce || names.length < 2) {
+          showName(chosen, false);
+          return;
+        }
+        spinning = true;
+        let step = 0;
+        const timer = setInterval(function () {
+          showName(names[step % names.length], false);
+          step += 1;
+          if (step > 14) {
+            clearInterval(timer);
+            spinning = false;
+            showName(chosen, false);
+          }
+        }, 45);
+      }
+
+      function shuffle(list) {
+        const copy = list.slice();
+        for (let i = copy.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = copy[i];
+          copy[i] = copy[j];
+          copy[j] = tmp;
+        }
+        return copy;
+      }
+
+      function group() {
+        const names = readNames();
+        groupsEl.replaceChildren();
+        if (names.length < 2) {
+          statusEl.textContent = "至少两个名字才能分组。";
+          return;
+        }
+        let count = Number(document.getElementById("group-count").value);
+        if (!Number.isFinite(count)) count = 2;
+        count = Math.max(2, Math.min(12, Math.floor(count)));
+        count = Math.min(count, names.length);
+        const buckets = [];
+        for (let i = 0; i < count; i += 1) buckets.push([]);
+        shuffle(names).forEach(function (name, index) {
+          buckets[index % count].push(name);
+        });
+        buckets.forEach(function (members, index) {
+          const box = document.createElement("section");
+          box.className = "group";
+          const title = document.createElement("h3");
+          title.textContent = "第 " + (index + 1) + " 组";
+          const list = document.createElement("ul");
+          members.forEach(function (name) {
+            const item = document.createElement("li");
+            item.textContent = name;
+            list.appendChild(item);
+          });
+          box.append(title, list);
+          groupsEl.appendChild(box);
+        });
+        renderStatus();
+      }
+
+      namesEl.addEventListener("input", function () {
+        try {
+          localStorage.setItem(KEY, namesEl.value);
+        } catch (err) {}
+        resetPool();
+        groupsEl.replaceChildren();
+        showName(readNames().length ? "点一名" : "先写下名单", true);
+      });
+
+      document.getElementById("sample").addEventListener("click", function () {
+        namesEl.value = SAMPLE.join("\n");
+        namesEl.dispatchEvent(new Event("input"));
+      });
+      document.getElementById("clear-names").addEventListener("click", function () {
+        namesEl.value = "";
+        namesEl.dispatchEvent(new Event("input"));
+      });
+      document.getElementById("draw").addEventListener("click", draw);
+      document.getElementById("again").addEventListener("click", function () {
+        resetPool();
+        showName(readNames().length ? "点一名" : "先写下名单", true);
+      });
+      document.getElementById("group").addEventListener("click", group);
+      window.addEventListener("keydown", function (event) {
+        if (event.code !== "Space") return;
+        if (event.target.closest("textarea, input, button, a")) return;
+        event.preventDefault();
+        draw();
+      });
+
+      try {
+        namesEl.value = localStorage.getItem(KEY) || "";
+      } catch (err) {}
+      resetPool();
+      showName(readNames().length ? "点一名" : "先写下名单", true);
+    </script>
+  </body>
+</html>
